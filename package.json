@@ -1,0 +1,47 @@
+{
+  "name": "cask",
+  "description": "Linux-like access control model",
+  "bin": {
+    "adduser": "bin/adduser.js",
+    "cat": "bin/cat.js",
+    "chmod": "bin/chmod.js",
+    "chown": "bin/chown.js",
+    "dir": "bin/dir.js",
+    "editor": "bin/editor.js",
+    "find": "bin/find.js",
+    "getfacl": "bin/getfacl.js",
+    "groupadd": "bin/groupadd.js",
+    "ln": "bin/ln.js",
+    "ls": "bin/ls.js",
+    "migrate": "bin/migrate.js",
+    "mkdir": "bin/mkdir.js",
+    "ps": "bin/ps.js",
+    "rm": "bin/rm.js",
+    "setfacl": "bin/setfacl.js",
+    "stat": "bin/stat.js",
+    "su": "bin/su.js",
+    "sudo": "bin/sudo.js",
+    "touch": "bin/touch.js",
+    "umask": "bin/umask.js",
+    "usermod": "bin/usermod.js"
+  },
+  "directories": {
+    "lib": "lib"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Akinjide Bankole <r@akinjide.me>",
+  "license": "ISC",
+  "dependencies": {
+    "async": "^3.2.4",
+    "chalk": "^5.1.2",
+    "commander": "^9.4.1",
+    "dayjs": "^1.11.6",
+    "inquirer": "^8.2.5",
+    "sqlite3": "^5.1.2"
+  },
+  "devDependencies": {
+    "jest": "^29.3.1"
+  }
+}
