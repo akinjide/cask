@@ -35,10 +35,10 @@
   "license": "ISC",
   "dependencies": {
     "async": "^3.2.4",
-    "chalk": "^5.1.2",
     "commander": "^9.4.1",
     "dayjs": "^1.11.6",
     "inquirer": "^8.2.5",
+    "kuler": "^2.0.0",
     "sqlite3": "^5.1.2"
   },
   "devDependencies": {

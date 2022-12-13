@@ -8,7 +8,7 @@ const inquirer = require('inquirer');
 const usr = require('../lib/usr');
 const dir = require('../lib/dir');
 const pem = require('../lib/pem');
-const grp = require('../lib/group');
+const grp = require('../lib/grp');
 const session = require('../lib/session');
 const crypto = require('../lib/crypto');
 
@@ -26,26 +26,31 @@ const infoPrompt = [
 		type: 'input',
 		name: 'full_name',
 		message: 'Full Name',
+		prefix: '\t',
 	},
 	{
 		type: 'input',
 		name: 'room_number',
 		message: 'Room Number',
+		prefix: '\t',
 	},
 	{
 		type: 'input',
 		name: 'work_phone',
 		message: 'Work Phone',
+		prefix: '\t',
 	},
 	{
 		type: 'input',
 		name: 'home_phone',
 		message: 'Home Phone',
+		prefix: '\t',
 	},
 	{
 		type: 'input',
 		name: 'other',
 		message: 'Other',
+		prefix: '\t',
 	},
 ];
 
@@ -58,38 +63,38 @@ program
 		try {
 			async.waterfall([
 				(callback) => {
-					session.get((err, data) => {
-						if (err || data == 'EMPTY') {
-							return callback('no active session');
+					session.get((err, s) => {
+						if (err || err == 'EMPTY') {
+							return callback('No active session');
 						}
 
-						if (data.toString() != pem.ROOT) {
+						if (s.toString() != pem.ROOT) {
 							return callback(`${login}: Permission denied`);
 						}
 
-						return callback(null, data);
+						return callback(null, s);
 					});
 				},
 				(sessionID, callback) => {
 					console.log(`Adding user \`${login}\` ...`);
 
-					usr.new(login, (err, record) => {
+					usr.new(login, (err, u) => {
 						if (err) {
 							return callback(err);
 						}
 
-						callback(null, sessionID, record);
+						callback(null, sessionID, u);
 					});
 				},
 				(sessionID, user, callback) => {
 					console.log(`Adding new group \`${login}\` ....`);
 
-					grp.new(login, user.id, (err, record) => {
+					grp.new(login, user.id, (err, g) => {
 						if (err) {
 							return callback(err);
 						}
 
-						callback(null, sessionID, user, record);
+						callback(null, sessionID, user, g);
 					});
 				},
 				(sessionID, user, group, callback) => {
@@ -125,7 +130,7 @@ program
 				(sessionID, user, group, defaultPem, homeDir, callback) => {
 					if (createHome) {
 						// TODO: set to 'staff'
-						return pem.new(user.id, group.id, homeDir.id, defaultPem, (err) => {
+						return pem.new(user.id, group.id, defaultPem, null, homeDir.id, (err) => {
 							if (err) {
 								return callback(err);
 							}
