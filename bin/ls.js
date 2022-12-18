@@ -2,7 +2,6 @@
 
 const util = require('node:util');
 const program = require('commander');
-const inquirer = require('inquirer');
 const dayjs = require('dayjs');
 const async = require('async');
 const kuler = require('kuler');
@@ -12,6 +11,7 @@ const file = require('../lib/file');
 const pem = require('../lib/pem');
 const common = require('../lib/common');
 const usr = require('../lib/usr');
+const crypto = require('../lib/crypto');
 
 program
   	.name('ls')
@@ -20,115 +20,105 @@ program
 	.option('-l', 'use a long listing format')
 	.option('-i, --inode', 'print the index number of each file')
 	.option('-d, --directory', 'list directory entries instead of contents, and do not dereference symbolic links')
-	.action(async (directoriesPath, { l, inode, directory }, cmd) => {
-		cmd.on('sudoer', () => {
-			console.log('yeet');
-		});
-
-		console.log(cmd);
-		console.log(this.arguments);
-
-		try {
-			async.waterfall([
-				(callback) => {
-					common.session.get((err, s) => {
-						if (err || s == 'EMPTY') {
-							return callback('No active session');
-						}
-
-						return callback(null, s);
-					});
-				},
-				(sessionID, callback) => {
-					usr.findWith(sessionID.toString(), (err, u) => {
-						if (err) {
-							return callback(err);
-						}
-
-						// console.log(u);
-						callback(null, sessionID, u);
-					});
-				},
-				(sessionID, user, callback) => {
-					common.pwd.get((err, p) => {
-						if (err) {
-							return callback(err);
-						}
-
-						callback(null, sessionID, user, p.toString().trim());
-					});
-				},
-				(sessionID, user, cwd, callback) => {
-					const directoryPathMatrix = [];
-
-					if (!directoriesPath || directoriesPath.length == 0) {
-						directoriesPath = [cwd];
+	.action(async (paths, options, cmd) => {
+		async.waterfall([
+			(callback) => {
+				common.session.get((err, s) => {
+					if (err || s == 'ERR_EMPTY') {
+						return callback('No active session');
 					}
 
-					for (let i = directoriesPath.length - 1; i >= 0; i--) {
-						directoryPathMatrix[i] = [];
+					return callback(null, s);
+				});
+			},
+            (sessionID, callback) => {
+                common.sudo.get((err, s) => {
+                    if (err || err == 'ERR_EMPTY') {
+                        return callback('No active sudo');
+                    }
 
-						let directoryPath = directoriesPath[i].split('/');
-
-						if (directoryPath.length == 1) {
-							const base = cwd.split('/');
-							base.push(...directoryPath);
-							directoryPath = base;
-						}
-
-						if (directoryPath[0] == '') {
-							directoryPath = directoryPath.slice(1);
-						}
-
-						for (let j = directoryPath.length - 1; j >= 0; j--) {
-							// if (!directoryPathMatrix[i].includes(directoryPath[j])) {
-							directoryPathMatrix[i][j] = directoryPath[j];
-							// }
-						}
+                    return callback(null, sessionID, s);
+                });
+            },
+			(sessionID, sudo, callback) => {
+				usr.findWith(sessionID.toString(), (err, u) => {
+					if (err) {
+						return callback(err);
 					}
 
-					callback(null, directoryPathMatrix);
-				},
-				(directoryPathMatrix, callback) => {
-					for (let i = directoryPathMatrix.length - 1; i >= 0; i--) {
-						dir.exist(directoryPathMatrix[i], (err, exist) => {
-							if (!exist) {
-								return callback(`${directoryPathMatrix[i].join('/')}: No such file or directory`);
-							}
+					callback(null, sessionID, u, sudo);
+				});
+			},
+			(sessionID, user, sudo, callback) => {
+				common.pwd.get((err, p) => {
+					if (err) {
+						return callback(err);
+					}
 
-							dir.find(directoryPathMatrix[i][directoryPathMatrix[i].length - 1], (err, d) => {
-								async.parallel([
-									(callback) => {
-										return file.children(d.directory_id, callback);
-									},
-									(callback) => {
-										return dir.children(d.directory_id, callback);
-									},
-								], (err, [files, directories]) => {
-									if (err) {
-										return callback(err);
+					callback(null, sessionID, user, p.toString().trim(), sudo);
+				});
+			},
+			(sessionID, user, cwd, sudo, callback) => {
+				const pathMatrix = common.path.resolve(paths, cwd);
+				callback(null, pathMatrix, user, sudo);
+			},
+			(pathMatrix, user, sudo, callback) => {
+				async.each(pathMatrix, (path, callback) => {
+					dir.exist(path, -1, (err, exist) => {
+						if (!exist) {
+							return callback(`${path.join('/')}: No such file or directory`);
+						}
+
+						dir.find(path[path.length - 1], (err, d) => {
+                            const { p_other, p_user, p_group, owner_id, group_id } = d;
+                            const canRead = pem.canRead(user.id, user.user_groups, { p_other, p_user, p_group, owner_id, group_id });
+
+                            if (!canRead) {
+                            	if (sudo.toString() != pem.SUDOERS) {
+	                                return callback(`${path.join('/')}: Permission denied`);
+	                            }
+                            }
+
+							async.parallel([
+								(callback) => {
+									return file.children(d.directory_id, callback);
+								},
+								(callback) => {
+									return dir.children(d.directory_id, callback);
+								},
+							], (err, [files, directories]) => {
+								if (err) {
+									return callback(err);
+								}
+
+								const total = (files.length + directories.length);
+								let fileCounter = 0;
+								let dirCounter = 0;
+								let output = '';
+
+								if (options.l) {
+									if (pathMatrix.length > 1) {
+										console.log(`${path.join('/')}:`);
 									}
 
-									const total = (files.length + directories.length);
-									let fileCounter = 0;
-									let dirCounter = 0;
-
-									if (!total) {
-										return;
+									if (total) {
+										console.log(`total ${total}`);
 									}
+								}
 
-									if (directoryPathMatrix.length > 1) {
-										console.log(`${directoryPathMatrix[i].join('/')}:`);
-									}
+								while (true) {
+									if (directories[dirCounter]) {
+										const d = directories[dirCounter++];
+										let inodeHash = '';
 
-									console.log(`total ${total}`);
+										if (options.inode) {
+											inodeHash = `${crypto.hash(d.directory_id.toString()).slice(0, 8)} `;
+										}
 
-									while (true) {
-										if (directories[dirCounter]) {
-											const d = directories[dirCounter++];
-
+										if (options.l) {
 											console.log(util.format(
-												`%s%s%s%s  %s %s %s\t%s %s ${kuler('%s', '#0000FF')}`,
+												`%s%s%s%s%s  %s %s %s\t%s %s ${kuler('%s', '#0000FF')}`,
+												inodeHash,
 												d.type,
 												pem.toASCII(d.p_user),
 												pem.toASCII(d.p_group),
@@ -140,14 +130,25 @@ program
 												dayjs(d.last_modified).format('MMM  DD HH:mm'),
 												d.name,
 											));
-											continue;
+										} else {
+											output += util.format(`%s${kuler('%s', '#0000FF')}\t`, inodeHash, d.name);
 										}
 
-										if (files[fileCounter]) {
-											const f = files[fileCounter++];
+										continue;
+									}
 
+									if (files[fileCounter]) {
+										const f = files[fileCounter++];
+										let inodeHash = '';
+
+										if (options.inode) {
+											inodeHash = `${crypto.hash(f.file_id.toString()).slice(0, 8)} `;
+										}
+
+										if (options.l) {
 											console.log(util.format(
-												'%s%s%s%s  %s %s %s\t%s %s %s',
+												'%s%s%s%s%s  %s %s %s\t%s %s %s',
+												inodeHash,
 												'-',
 												pem.toASCII(f.p_user),
 												pem.toASCII(f.p_group),
@@ -159,31 +160,33 @@ program
 												dayjs(f.last_modified).format('MMM  DD HH:mm'),
 												(f.type ? `${f.name}.${f.type}` : f.name),
 											));
-											continue;
+										} else {
+											output += util.format('%s%s\t', inodeHash, (f.type ? `${f.name}.${f.type}` : f.name));
 										}
 
-										if (!directories[dirCounter] && !files[fileCounter]) {
-											break;
-										}
+										continue;
 									}
 
-									if (directoryPathMatrix.length == i) {
-										callback(null);
+									if (!directories[dirCounter] && !files[fileCounter]) {
+										if (!options.l) {
+											console.log(output);
+										}
+
+										break;
 									}
-								});
+								}
+
+								callback(null);
 							});
 						});
-					}
-				},
-			], (err, results) => {
-				if (err) {
-					console.log('ls:', err);
-					return;
-				}
-			});
-		} catch (error) {
-			console.log(error);
-		}
+					});
+				}, callback);
+			},
+		], (err) => {
+			if (err) {
+				return program.error(`ls: ${err}`, { exitCode: 1 });
+			}
+		});
 	});
 
 program.parse(process.argv);

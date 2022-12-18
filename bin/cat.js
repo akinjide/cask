@@ -1,18 +1,14 @@
 #!/usr/bin/env node
 
-const util = require('node:util');
 const program = require('commander');
 const inquirer = require('inquirer');
-const dayjs = require('dayjs');
 const async = require('async');
-const kuler = require('kuler');
 
 const dir = require('../lib/dir');
 const file = require('../lib/file');
 const pem = require('../lib/pem');
-const session = require('../lib/session');
+const common = require('../lib/common');
 const usr = require('../lib/usr');
-const pwd = require('../lib/pwd');
 const grp = require('../lib/grp');
 
 program
@@ -20,186 +16,213 @@ program
  	.description('cat - concatenate files and print on the standard output')
 	.argument('[FILE...]')
 	.option('-w, --write', 'add content to specified file. Create file if it does not exist')
-	.action(async (directoriesPath, { write }, cmd) => {
-		try {
-			async.waterfall([
-				(callback) => {
-					session.get((err, s) => {
-						if (err || s == 'EMPTY') {
-							return callback('No active session');
-						}
-
-						return callback(null, s);
-					});
-				},
-				(sessionID, callback) => {
-					usr.findWith(sessionID.toString(), (err, u) => {
-						if (err) {
-							return callback(err);
-						}
-
-						callback(null, sessionID, u);
-					});
-				},
-				(sessionID, user, callback) => {
-					pwd.get((err, p) => {
-						if (err) {
-							return callback(err);
-						}
-
-						callback(null, sessionID, user, p.toString().trim());
-					});
-				},
-				(sessionID, user, cwd, callback) => {
-					const directoryPathMatrix = [];
-
-					if (!directoriesPath || directoriesPath.length == 0) {
-						directoriesPath = [cwd];
+	.action(async (paths, options, cmd) => {
+		async.waterfall([
+			(callback) => {
+				common.session.get((err, s) => {
+					if (err || s == 'ERR_EMPTY') {
+						return callback('No active session');
 					}
 
-					for (let i = directoriesPath.length - 1; i >= 0; i--) {
-						directoryPathMatrix[i] = [];
+					return callback(null, s);
+				});
+			},
+            (sessionID, callback) => {
+                common.sudo.get((err, s) => {
+                    if (err || err == 'ERR_EMPTY') {
+                        return callback('No active sudo');
+                    }
 
-						let directoryPath = directoriesPath[i].split('/');
-
-						if (directoryPath.length == 1) {
-							const base = cwd.split('/');
-							base.push(...directoryPath);
-							directoryPath = base;
-						}
-
-						if (directoryPath[0] == '') {
-							directoryPath = directoryPath.slice(1);
-						}
-
-						for (let j = directoryPath.length - 1; j >= 0; j--) {
-							// if (!directoryPathMatrix[i].includes(directoryPath[j])) {
-							directoryPathMatrix[i][j] = directoryPath[j];
-							// }
-						}
+                    return callback(null, sessionID, s);
+                });
+            },
+			(sessionID, sudo, callback) => {
+				usr.findWith(sessionID.toString(), (err, u) => {
+					if (err) {
+						return callback(err);
 					}
 
-					callback(null, sessionID, user, cwd, directoryPathMatrix);
-				},
-				(sessionID, user, cwd, directoryPathMatrix, callback) => {
-					if (write) {
-						return callback(null, sessionID, user, cwd, directoryPathMatrix);
+					callback(null, sessionID, u, sudo);
+				});
+			},
+			(sessionID, user, sudo, callback) => {
+				common.pwd.get((err, p) => {
+					if (err) {
+						return callback(err);
 					}
 
-					async.each(directoryPathMatrix, (directoryPath, callback) => {
-						const [filename, format] = directoryPath[directoryPath.length - 1].split('.');
+					callback(null, sessionID, user, p.toString().trim(), sudo);
+				});
+			},
+			(sessionID, user, cwd, sudo, callback) => {
+                const pathMatrix = common.path.resolve(paths, cwd);
+				callback(null, sessionID, user, cwd, pathMatrix, sudo);
+			},
+			(sessionID, user, cwd, pathMatrix, sudo, callback) => {
+                async.each(pathMatrix, (filePath, callback) => {
+                    dir.exist(filePath.slice(0, filePath.length - 1), -1, (err, exist) => {
+                        if (!exist) {
+                            return callback(`${filePath.join('/')}: No such file or directory`);
+                        }
 
-						return file.findWith(filename, (err, f) => {
-							if (err) {
-								return callback(err);
-							}
+                        if (options.write) {
+                            if (pathMatrix.length > 1) {
+                                return callback('No multiple write');
+                            }
 
-							if (!f) {
-								return callback(`${directoryPath.join('/')}: No such file or directory`);
-							}
+                            return callback(null);
+                        }
 
-							console.log(f.content);
-						});
-					}, (err) => {
-						callback(err);
-					});
-				},
-				(sessionID, user, cwd, directoryPathMatrix, callback) => {
-					grp.find(user.username, user.id, (err, g) => {
-						if (err) {
-							return callback(err);
-						}
+                        const parentDirectory = filePath[filePath.length - 2];
+                        const [filename, _] = filePath[filePath.length - 1].split('.');
 
-						return callback(null, sessionID, user, cwd, directoryPathMatrix, g);
-					});
-				},
-				(sessionID, user, cwd, directoryPathMatrix, group, callback) => {
-					pem.getDefault((err, p) => {
-						if (err) {
-							return callback(err);
-						}
+                        return file.parent(filename, parentDirectory, (err, f) => {
+                            if (err) {
+                                return callback(err);
+                            }
 
-						callback(null, sessionID, user, cwd, directoryPathMatrix, group, p);
-					});
-				},
-				(sessionID, user, cwd, directoryPathMatrix, group, defaultPem, callback) => {
-					const directoryPath = directoryPathMatrix[0];
-					const [filename, type] = directoryPath[directoryPath.length - 1].split('.');
+                            if (!f || f.directory_name != parentDirectory) {
+                                return callback(`${filePath.join('/')}: No such file or directory`);
+                            }
 
-					(async () => {
-						const info = await inquirer.prompt([
-							{
-								type: 'input',
-								name: 'content',
-								message: ' ',
-								prefix: '',
-							}
-						]);
+                            const { p_other, p_user, p_group, owner_id, group_id } = f;
+                            const canRead = pem.canRead(user.id, user.user_groups, { p_other, p_user, p_group, owner_id, group_id });
 
-						const c = {
-							content: info.content,
-							size: info.content.length,
-						};
+                            if (!canRead) {
+                                if (sudo.toString() != pem.SUDOERS) {
+                                    return callback(`${filePath.join('/')}: Permission denied`);
+                                }
+                            }
 
-						file.findWith(filename, (err, f) => {
-							if (err) {
-								return callback(err);
-							}
+                            console.log(f.content);
+                        });
+                    });
+                }, (err) => {
+                    if (err) {
+                        return callback(err);
+                    }
 
-							if (f) {
-								return file.change(f.id, { ...f, ...c }, (err, _) => {
-									if (err) {
-										return callback(err);
-									}
-
-									return callback(null, sessionID, user, cwd, directoryPathMatrix, group, defaultPem, c, f, true);
-								});
-							}
-
-							return callback(null, sessionID, user, cwd, directoryPathMatrix, group, defaultPem, c, null, false);
-						});
-					})();
-				},
-				(sessionID, user, cwd, directoryPathMatrix, group, defaultPem, c, f, fileExist, callback) => {
-					if (fileExist) {
-						return callback(null, user, c, f);
+                    callback(null, sessionID, user, cwd, pathMatrix, sudo);
+                });
+			},
+			(sessionID, user, cwd, pathMatrix, sudo, callback) => {
+				grp.findWithUser(user.username, user.id, (err, g) => {
+					if (err) {
+						return callback(err);
 					}
 
-					const directoryPath = directoryPathMatrix[0];
-					const [filename, type] = directoryPath[directoryPath.length - 1].split('.');
+					return callback(null, sessionID, user, cwd, pathMatrix, g, sudo);
+				});
+			},
+			(sessionID, user, cwd, pathMatrix, group, sudo, callback) => {
+				pem.default.get((err, p) => {
+					if (err) {
+						return callback(err);
+					}
 
-					file.new(filename, c.size, type, c.content, Date.now(), user.home_directory_id, (err, f) => {
-						if (err) {
-							return callback(err);
-						}
+					callback(null, sessionID, user, cwd, pathMatrix, group, p, sudo);
+				});
+			},
+			(sessionID, user, cwd, pathMatrix, group, defaultPem, sudo, callback) => {
+                (async () => {
+                    const info = await inquirer.prompt([
+                        {
+                            type: 'input',
+                            name: 'content',
+                            message: ' ',
+                            prefix: '',
+                        }
+                    ]);
 
-						return pem.new(user.id, group.id, defaultPem, f.id, null, (err) => {
-							if (err) {
-								return callback(err);
-							}
+                    const filePath = pathMatrix[0];
+                    const [filename, filetype] = filePath[filePath.length - 1].split('.');
+                    const parentDirectory = filePath[filePath.length - 2];
+                    const c = {
+                        content: info.content,
+                        size: info.content.length * file.size,
+                    };
 
-							callback(null, user, c, f);
-						});
-					});
-				},
-				(user, c, f, callback) => {
-					return dir.changeBytes(f.directory_id, c.size, (err, _) => {
-						if (err) {
-							return callback(err);
-						}
+    				file.parent(filename, parentDirectory, (err, f) => {
+    					if (err) {
+    						return callback(err);
+    					}
 
-						callback(null);
-					});
+                        if (!f || f.directory_name != parentDirectory) {
+                            return dir.find(parentDirectory, (err, d) => {
+                                if (err) {
+                                    return callback(err);
+                                }
+
+                                let directoryID = user.home_directory_id;
+
+                                if (d) {
+                                    directoryID = d.directory_id;
+                                    const { p_other, p_user, p_group, owner_id, group_id } = d;
+                                    const canWrite = pem.canWrite(user.id, user.user_groups, { p_other, p_user, p_group, owner_id, group_id });
+
+                                    if (!canWrite) {
+                                        if (sudo.toString() != pem.SUDOERS) {
+                                            return callback(`${filePath.join('/')}: Permission denied`);
+                                        }
+                                    }
+                                }
+
+                                return callback(null, sessionID, user, cwd, pathMatrix, group, defaultPem, c, null, false, filename, filetype, directoryID);
+                            });
+                        }
+
+                        const { p_other, p_user, p_group, owner_id, group_id } = f;
+                        const canWrite = pem.canWrite(user.id, user.user_groups, { p_other, p_user, p_group, owner_id, group_id });
+
+                        if (!canWrite) {
+                            if (sudo.toString() != pem.SUDOERS) {
+                                return callback(`${filePath.join('/')}: Permission denied`);
+                            }
+                        }
+
+                        return file.change(f.file_id, { ...f, ...c }, (err, _) => {
+                            if (err) {
+                                return callback(err);
+                            }
+
+                            return callback(null, sessionID, user, cwd, pathMatrix, group, defaultPem, c, f, true, filename, filetype, null);
+                        });
+    				});
+                })();
+			},
+			(sessionID, user, cwd, pathMatrix, group, defaultPem, c, f, fileExist, fileName, fileType, directoryID, callback) => {
+				if (fileExist) {
+					return callback(null, user, c, f);
 				}
-			], (err, results) => {
-				if (err) {
-					console.log('cat:', err);
-					return;
-				}
-			});
-		} catch (error) {
-			console.log(error);
-		}
+
+				file.new(fileName, c.size, fileType, c.content, Date.now(), directoryID, (err, f) => {
+					if (err) {
+						return callback(err);
+					}
+
+					return pem.new(user.id, group.id, defaultPem, f.id, null, (err) => {
+						if (err) {
+							return callback(err);
+						}
+
+						callback(null, user, c, f);
+					});
+				});
+			},
+			(user, c, f, callback) => {
+				return dir.upsertBytes(f.directory_id, c.size, (err, _) => {
+					if (err) {
+						return callback(err);
+					}
+
+					callback(null);
+				});
+			}
+		], (err) => {
+			if (err) {
+                return program.error(`cat: ${err}`, { exitCode: 1 });
+			}
+		});
 	});
 
 program.parse(process.argv);

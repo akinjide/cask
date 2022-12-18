@@ -11,17 +11,15 @@ const grp = require('../lib/grp');
 const common = require('../lib/common');
 
 program
-  	.name('chown')
- 	.description('chown - change file owner and group')
-	.argument('[OWNER][:[GROUP]]')
+  	.name('chmod')
+ 	.description('chmod - change file mode bits')
+	.argument('MODE[,MODE]')
 	.argument('[FILE...]')
 	.option('-R, --recursive', 'operate on files and directories recursively')
-	.action(async (stmt, paths, options, cmd) => {
-		const [ownerUsername, ownerGroup] = stmt.split(':');
-
-		if (!(ownerUsername || ownerGroup)) {
-            return program.error('chown: owner:group file ...', { exitCode: 1 });
-		}
+	.action(async (mode, paths, options, cmd) => {
+        if (!mode) {
+            return program.error('chmod: mode file ...', { exitCode: 1 });
+        }
 
 		async.waterfall([
 			(callback) => {
@@ -40,52 +38,46 @@ program
                     }
 
                     if (s.toString() != pem.SUDOERS) {
-                        return callback(`${stmt} ${paths}: Permission denied`);
+                        return callback(`${mode} ${paths}: Permission denied`);
                     }
 
                     return callback(null, sessionID);
                 });
             },
 			(sessionID, callback) => {
-				if (ownerUsername) {
-					return usr.findWith(ownerUsername, (err, u) => {
-						if (err) {
-							return callback(err);
-						}
+                usr.findWith(sessionID.toString(), (err, u) => {
+					if (err) {
+						return callback(err);
+					}
 
-						callback(null, sessionID, u);
-					});
-				}
-
-				callback(null, sessionID, null);
+					callback(null, sessionID, u);
+				});
 			},
 			(sessionID, user, callback) => {
-				if (ownerGroup) {
-					return grp.find(ownerGroup, (err, g) => {
-						if (err) {
-							return callback(err);
-						}
-
-						callback(null, sessionID, user, g);
-					});
-				}
-
-				callback(null, sessionID, user, null);
-			},
-			(sessionID, user, group, callback) => {
 				common.pwd.get((err, p) => {
 					if (err) {
 						return callback(err);
 					}
 
-					callback(null, sessionID, user, group, p.toString().trim());
+					callback(null, sessionID, user, p.toString().trim());
 				});
 			},
-			(sessionID, user, group, cwd, callback) => {
+			(sessionID, user, cwd, callback) => {
                 const pathMatrix = common.path.resolve(paths, cwd);
-                callback(null, sessionID, user, group, cwd, pathMatrix);
+				callback(null, sessionID, user, cwd, pathMatrix);
 			},
-			(sessionID, user, group, cwd, pathMatrix, callback) => {
+            (sessionID, user, cwd, pathMatrix, callback) => {
+                // Each MODE is of the form '[ugoa]*([-+=]([rwxXst]*|[ugo]))+'.
+                // TODO: ensure mode is number only
+                let modeOctal = mode.split('');
+
+                for (let i = modeOctal.length - 1; i >= 0; i--) {
+                    modeOctal[i] = parseInt(modeOctal[i], 10);
+                }
+
+                callback(null, sessionID, user, cwd, pathMatrix, modeOctal);
+            },
+			(sessionID, user, cwd, pathMatrix, modeOctal, callback) => {
 				async.each(pathMatrix, (path, callback) => {
 					dir.exist(path.slice(0, path.length - 1), -1, (err, exist) => {
 						if (err) {
@@ -118,19 +110,17 @@ program
                                                 return next(err);
                                             }
 
-                                            let permission = { ...p };
-
-                                            if (user) {
-                                                permission = { ...permission, owner_id: user.id };
-                                            }
-
-                                            if (group) {
-                                                permission = { ...permission, group_id: group.id };
-                                            }
+                                            const [u,g,o] = modeOctal;
+                                            const permission = {
+                                                ...p,
+                                                p_user: u,
+                                                p_group: g,
+                                                p_other: o,
+                                            };
 
                                             pem.change(c.permission_id, permission, (err, p) => {
                                                 if (err) {
-                                                    return callback(err);
+                                                    return next(err);
                                                 }
 
                                                 next(null);
@@ -158,15 +148,13 @@ program
                                     return callback(err);
                                 }
 
-                                let permission = { ...p };
-
-                                if (user) {
-                                    permission = { ...permission, owner_id: user.id };
-                                }
-
-                                if (group) {
-                                    permission = { ...permission, group_id: group.id };
-                                }
+                                const [u,g,o] = modeOctal;
+                                const permission = {
+                                    ...p,
+                                    p_user: u,
+                                    p_group: g,
+                                    p_other: o,
+                                };
 
                                 pem.change(f.permission_id, permission, (err, p) => {
                                     if (err) {
@@ -182,10 +170,10 @@ program
 			},
 		], (err) => {
 			if (err) {
-                return program.error(`chown: ${err}`, { exitCode: 1 });
+                return program.error(`chmod: ${err}`, { exitCode: 1 });
 			}
 
-			console.log('chown: OK');
+			console.log('chmod: OK');
 		});
 	});
 
