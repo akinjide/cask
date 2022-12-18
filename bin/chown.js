@@ -11,28 +11,28 @@ const grp = require('../lib/grp');
 const common = require('../lib/common');
 
 program
-  	.name('chown')
- 	.description('chown - change file owner and group')
-	.argument('[OWNER][:[GROUP]]')
-	.argument('[FILE...]')
-	.option('-R, --recursive', 'operate on files and directories recursively')
-	.action(async (stmt, paths, options, cmd) => {
-		const [ownerUsername, ownerGroup] = stmt.split(':');
+    .name('chown')
+    .description('chown - change file owner and group')
+    .argument('[OWNER][:[GROUP]]')
+    .argument('[FILE...]')
+    .option('-R, --recursive', 'operate on files and directories recursively')
+    .action(async (stmt, paths, options, cmd) => {
+        const [ownerUsername, ownerGroup] = stmt.split(':');
 
-		if (!(ownerUsername || ownerGroup)) {
+        if (!(ownerUsername || ownerGroup)) {
             return program.error('chown: owner:group file ...', { exitCode: 1 });
-		}
+        }
 
-		async.waterfall([
-			(callback) => {
-				common.session.get((err, s) => {
-					if (err || s == 'ERR_EMPTY') {
-						return callback('No active session');
-					}
+        async.waterfall([
+            (callback) => {
+                common.session.get((err, s) => {
+                    if (err || s == 'ERR_EMPTY') {
+                        return callback('No active session');
+                    }
 
-					return callback(null, s);
-				});
-			},
+                    return callback(null, s);
+                });
+            },
             (sessionID, callback) => {
                 common.sudo.get((err, s) => {
                     if (err || err == 'ERR_EMPTY') {
@@ -46,55 +46,55 @@ program
                     return callback(null, sessionID);
                 });
             },
-			(sessionID, callback) => {
-				if (ownerUsername) {
-					return usr.findWith(ownerUsername, (err, u) => {
-						if (err) {
-							return callback(err);
-						}
+            (sessionID, callback) => {
+                if (ownerUsername) {
+                    return usr.findWith(ownerUsername, (err, u) => {
+                        if (err) {
+                            return callback(err);
+                        }
 
-						callback(null, sessionID, u);
-					});
-				}
+                        callback(null, sessionID, u);
+                    });
+                }
 
-				callback(null, sessionID, null);
-			},
-			(sessionID, user, callback) => {
-				if (ownerGroup) {
-					return grp.find(ownerGroup, (err, g) => {
-						if (err) {
-							return callback(err);
-						}
+                callback(null, sessionID, null);
+            },
+            (sessionID, user, callback) => {
+                if (ownerGroup) {
+                    return grp.find(ownerGroup, (err, g) => {
+                        if (err) {
+                            return callback(err);
+                        }
 
-						callback(null, sessionID, user, g);
-					});
-				}
+                        callback(null, sessionID, user, g);
+                    });
+                }
 
-				callback(null, sessionID, user, null);
-			},
-			(sessionID, user, group, callback) => {
-				common.pwd.get((err, p) => {
-					if (err) {
-						return callback(err);
-					}
+                callback(null, sessionID, user, null);
+            },
+            (sessionID, user, group, callback) => {
+                common.pwd.get((err, p) => {
+                    if (err) {
+                        return callback(err);
+                    }
 
-					callback(null, sessionID, user, group, p.toString().trim());
-				});
-			},
-			(sessionID, user, group, cwd, callback) => {
+                    callback(null, sessionID, user, group, p.toString().trim());
+                });
+            },
+            (sessionID, user, group, cwd, callback) => {
                 const pathMatrix = common.path.resolve(paths, cwd);
                 callback(null, sessionID, user, group, cwd, pathMatrix);
-			},
-			(sessionID, user, group, cwd, pathMatrix, callback) => {
-				async.each(pathMatrix, (path, callback) => {
-					dir.exist(path.slice(0, path.length - 1), -1, (err, exist) => {
-						if (err) {
-							return callback(err);
-						}
+            },
+            (sessionID, user, group, cwd, pathMatrix, callback) => {
+                async.each(pathMatrix, (path, callback) => {
+                    dir.exist(path.slice(0, path.length - 1), -1, (err, exist) => {
+                        if (err) {
+                            return callback(err);
+                        }
 
-						if (!exist) {
-							return callback(`${path.join('/')}: No such file or directory`);
-						}
+                        if (!exist) {
+                            return callback(`${path.join('/')}: No such file or directory`);
+                        }
 
                         const lastPath = path[path.length - 1];
 
@@ -177,16 +177,16 @@ program
                                 });
                             });
                         });
-					});
-				}, callback);
-			},
-		], (err) => {
-			if (err) {
+                    });
+                }, callback);
+            },
+        ], (err) => {
+            if (err) {
                 return program.error(`chown: ${err}`, { exitCode: 1 });
-			}
+            }
 
-			console.log('chown: OK');
-		});
-	});
+            console.log('chown: OK');
+        });
+    });
 
 program.parse(process.argv);

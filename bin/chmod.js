@@ -11,26 +11,26 @@ const grp = require('../lib/grp');
 const common = require('../lib/common');
 
 program
-  	.name('chmod')
- 	.description('chmod - change file mode bits')
-	.argument('MODE[,MODE]')
-	.argument('[FILE...]')
-	.option('-R, --recursive', 'operate on files and directories recursively')
-	.action(async (mode, paths, options, cmd) => {
+    .name('chmod')
+    .description('chmod - change file mode bits')
+    .argument('MODE[,MODE]')
+    .argument('[FILE...]')
+    .option('-R, --recursive', 'operate on files and directories recursively')
+    .action(async (mode, paths, options, cmd) => {
         if (!mode) {
             return program.error('chmod: mode file ...', { exitCode: 1 });
         }
 
-		async.waterfall([
-			(callback) => {
-				common.session.get((err, s) => {
-					if (err || s == 'ERR_EMPTY') {
-						return callback('No active session');
-					}
+        async.waterfall([
+            (callback) => {
+                common.session.get((err, s) => {
+                    if (err || s == 'ERR_EMPTY') {
+                        return callback('No active session');
+                    }
 
-					return callback(null, s);
-				});
-			},
+                    return callback(null, s);
+                });
+            },
             (sessionID, callback) => {
                 common.sudo.get((err, s) => {
                     if (err || err == 'ERR_EMPTY') {
@@ -44,28 +44,28 @@ program
                     return callback(null, sessionID);
                 });
             },
-			(sessionID, callback) => {
+            (sessionID, callback) => {
                 usr.findWith(sessionID.toString(), (err, u) => {
-					if (err) {
-						return callback(err);
-					}
+                    if (err) {
+                        return callback(err);
+                    }
 
-					callback(null, sessionID, u);
-				});
-			},
-			(sessionID, user, callback) => {
-				common.pwd.get((err, p) => {
-					if (err) {
-						return callback(err);
-					}
+                    callback(null, sessionID, u);
+                });
+            },
+            (sessionID, user, callback) => {
+                common.pwd.get((err, p) => {
+                    if (err) {
+                        return callback(err);
+                    }
 
-					callback(null, sessionID, user, p.toString().trim());
-				});
-			},
-			(sessionID, user, cwd, callback) => {
+                    callback(null, sessionID, user, p.toString().trim());
+                });
+            },
+            (sessionID, user, cwd, callback) => {
                 const pathMatrix = common.path.resolve(paths, cwd);
-				callback(null, sessionID, user, cwd, pathMatrix);
-			},
+                callback(null, sessionID, user, cwd, pathMatrix);
+            },
             (sessionID, user, cwd, pathMatrix, callback) => {
                 // Each MODE is of the form '[ugoa]*([-+=]([rwxXst]*|[ugo]))+'.
                 // TODO: ensure mode is number only
@@ -77,16 +77,16 @@ program
 
                 callback(null, sessionID, user, cwd, pathMatrix, modeOctal);
             },
-			(sessionID, user, cwd, pathMatrix, modeOctal, callback) => {
-				async.each(pathMatrix, (path, callback) => {
-					dir.exist(path.slice(0, path.length - 1), -1, (err, exist) => {
-						if (err) {
-							return callback(err);
-						}
+            (sessionID, user, cwd, pathMatrix, modeOctal, callback) => {
+                async.each(pathMatrix, (path, callback) => {
+                    dir.exist(path.slice(0, path.length - 1), -1, (err, exist) => {
+                        if (err) {
+                            return callback(err);
+                        }
 
-						if (!exist) {
-							return callback(`${path.join('/')}: No such file or directory`);
-						}
+                        if (!exist) {
+                            return callback(`${path.join('/')}: No such file or directory`);
+                        }
 
                         const lastPath = path[path.length - 1];
 
@@ -165,16 +165,16 @@ program
                                 });
                             });
                         });
-					});
-				}, callback);
-			},
-		], (err) => {
-			if (err) {
+                    });
+                }, callback);
+            },
+        ], (err) => {
+            if (err) {
                 return program.error(`chmod: ${err}`, { exitCode: 1 });
-			}
+            }
 
-			console.log('chmod: OK');
-		});
-	});
+            console.log('chmod: OK');
+        });
+    });
 
 program.parse(process.argv);
